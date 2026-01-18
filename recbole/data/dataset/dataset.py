@@ -282,12 +282,13 @@ class Dataset(torch.utils.data.Dataset):
         Otherwise, load interaction features from a file list, named ``dataset_name.xxx.inter``,
         where ``xxx`` if from ``config['benchmark_filename']``.
         After loading, ``self.file_size_list`` stores the length of each interaction file.
-
+dataframe_to_interaction(
         Args:
             token (str): dataset name.
             dataset_path (str): path of dataset dir.
         """
         if self.benchmark_filename_list is None:
+            print("self.benchmark_filename_list is None")
             inter_feat_path = os.path.join(dataset_path, f"{token}.inter")
             if not os.path.isfile(inter_feat_path):
                 raise ValueError(f"File {inter_feat_path} not exist.")
@@ -297,7 +298,11 @@ class Dataset(torch.utils.data.Dataset):
                 f"Interaction feature loaded successfully from [{inter_feat_path}]."
             )
             self.inter_feat = inter_feat
+            # inter_feat = pd.concat(sub_inter_feats, ignore_index=True)
+            # print("inter_feat", inter_feat.head())
+            inter_feat.to_csv("first_attempt.csv")
         else:
+            print("else")
             sub_inter_lens = []
             sub_inter_feats = []
             overall_field2seqlen = defaultdict(int)
@@ -314,6 +319,7 @@ class Dataset(torch.utils.data.Dataset):
                 else:
                     raise ValueError(f"File {file_path} not exist.")
             inter_feat = pd.concat(sub_inter_feats, ignore_index=True)
+            inter_feat.to_csv("first_attempt.csv")
             self.inter_feat, self.file_size_list = inter_feat, sub_inter_lens
             self.field2seqlen = overall_field2seqlen
 
@@ -1217,11 +1223,14 @@ class Dataset(torch.utils.data.Dataset):
                 split_point = np.cumsum(feat[field].agg(len))[:-1]
                 feat[field] = np.split(new_ids, split_point)
 
-    def _change_feat_format(self):
-        """Change feat format from :class:`pandas.DataFrame` to :class:`Interaction`."""
-        for feat_name in self.feat_name_list:
-            feat = getattr(self, feat_name)
-            setattr(self, feat_name, self._dataframe_to_interaction(feat))
+    def _change_feat_format(self, csv_ds):
+        """Convert list[pd.DataFrame] -> list[Dataset] with inter_feat as Interaction."""
+        ds_list = []
+        for df in csv_ds:
+            inter = self._dataframe_to_interaction(df)   # DataFrame -> Interaction
+            ds_list.append(self.copy(inter))             # Interaction -> Dataset
+        return ds_list
+
 
     def num(self, field):
         """Given ``field``, for token-like fields, return the number of different tokens after remapping,
@@ -1750,61 +1759,73 @@ class Dataset(torch.utils.data.Dataset):
         Returns:
             list: List of built :class:`Dataset`.
         """
-        self._change_feat_format()
 
-        if self.benchmark_filename_list is not None:
-            self._drop_unused_col()
-            cumsum = list(np.cumsum(self.file_size_list))
-            datasets = [
-                self.copy(self.inter_feat[start:end])
-                for start, end in zip([0] + cumsum[:-1], cumsum)
-            ]
-            return datasets
+        train_ds, val_ds, test_ds = pd.read_csv("reviews_Beauty_5/train.csv"),  pd.read_csv("reviews_Beauty_5/validation.csv"),  pd.read_csv("reviews_Beauty_5/test.csv")
+        train_ds, val_ds, test_ds = self._change_feat_format([train_ds, val_ds, test_ds])
 
-        # ordering
-        ordering_args = self.config["eval_args"]["order"]
-        if ordering_args == "RO":
-            self.shuffle()
-        elif ordering_args == "TO":
-            self.sort(by=self.time_field)
-        else:
-            raise NotImplementedError(
-                f"The ordering_method [{ordering_args}] has not been implemented."
-            )
+        # if self.benchmark_filename_list is not None:
+        #     self._drop_unused_col()
+        #     cumsum = list(np.cumsum(self.file_size_list))
+        #     datasets = [
+        #         self.copy(self.inter_feat[start:end])
+        #         for start, end in zip([0] + cumsum[:-1], cumsum)
+        #     ]
+        #     return datasets
 
-        # splitting & grouping
-        split_args = self.config["eval_args"]["split"]
-        if split_args is None:
-            raise ValueError("The split_args in eval_args should not be None.")
-        if not isinstance(split_args, dict):
-            raise ValueError(f"The split_args [{split_args}] should be a dict.")
+        # # ordering
+        # ordering_args = self.config["eval_args"]["order"]
+        # if ordering_args == "RO":
+        #     self.shuffle()
+        # elif ordering_args == "TO":
+        #     self.sort(by=self.time_field)
+        # else:
+        #     raise NotImplementedError(
+        #         f"The ordering_method [{ordering_args}] has not been implemented."
+        #     )
 
-        split_mode = list(split_args.keys())[0]
-        assert len(split_args.keys()) == 1
-        group_by = self.config["eval_args"]["group_by"]
-        if split_mode == "RS":
-            if not isinstance(split_args["RS"], list):
-                raise ValueError(f'The value of "RS" [{split_args}] should be a list.')
-            if group_by is None or group_by.lower() == "none":
-                datasets = self.split_by_ratio(split_args["RS"], group_by=None)
-            elif group_by == "user":
-                datasets = self.split_by_ratio(
-                    split_args["RS"], group_by=self.uid_field
-                )
-            else:
-                raise NotImplementedError(
-                    f"The grouping method [{group_by}] has not been implemented."
-                )
-        elif split_mode == "LS":
-            datasets = self.leave_one_out(
-                group_by=self.uid_field, leave_one_mode=split_args["LS"]
-            )
-        else:
-            raise NotImplementedError(
-                f"The splitting_method [{split_mode}] has not been implemented."
-            )
+        # # splitting & grouping
+        # split_args = self.config["eval_args"]["split"]
 
-        return datasets
+        # print()
+        # print(split_args)
+        # print()
+
+        # if split_args is None:
+        #     raise ValueError("The split_args in eval_args should not be None.")
+        # if not isinstance(split_args, dict):
+        #     raise ValueError(f"The split_args [{split_args}] should be a dict.")
+
+        # split_mode = list(split_args.keys())[0]
+
+        # assert len(split_args.keys()) == 1
+        # group_by = self.config["eval_args"]["group_by"]
+        # if split_mode == "RS":
+        #     if not isinstance(split_args["RS"], list):
+        #         raise ValueError(f'The value of "RS" [{split_args}] should be a list.')
+        #     if group_by is None or group_by.lower() == "none":
+        #         datasets = self.split_by_ratio(split_args["RS"], group_by=None)
+        #     elif group_by == "user":
+        #         datasets = self.split_by_ratio(
+        #             split_args["RS"], group_by=self.uid_field
+        #         )
+        #     else:
+        #         raise NotImplementedError(
+        #             f"The grouping method [{group_by}] has not been implemented."
+        #         )
+        # elif split_mode == "LS":
+        #     datasets = self.leave_one_out(
+        #         group_by=self.uid_field, leave_one_mode=split_args["LS"]
+        #     )
+
+        # else:
+        #     raise NotImplementedError(
+        #         f"The splitting_method [{split_mode}] has not been implemented."
+        #     )
+        print()
+        print("type of train_ds", type(train_ds))
+        print()
+
+        return [train_ds, val_ds, test_ds] 
 
     def save(self):
         """Saving this :class:`Dataset` object to :attr:`config['checkpoint_dir']`."""
@@ -2129,6 +2150,7 @@ class Dataset(torch.utils.data.Dataset):
             :class:`~recbole.data.interaction.Interaction`: Converted data.
         """
         new_data = {}
+        data = data.drop(columns=["rating"])
         for k in data:
             value = data[k].values
             ftype = self.field2type[k]

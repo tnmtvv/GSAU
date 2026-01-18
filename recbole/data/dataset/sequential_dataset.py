@@ -12,6 +12,8 @@ recbole.data.sequential_dataset
 ###############################
 """
 
+from gc import DEBUG_SAVEALL
+from unittest import TestCase
 import numpy as np
 import torch
 
@@ -37,119 +39,194 @@ class SequentialDataset(Dataset):
         if config["benchmark_filename"] is not None:
             self._benchmark_presets()
 
-    def _change_feat_format(self):
+    def _change_feat_format(self, ds_list):
         """Change feat format from :class:`pandas.DataFrame` to :class:`Interaction`,
         then perform data augmentation.
         """
-        super()._change_feat_format()
+        train, val, test = super()._change_feat_format(ds_list)
+        print("instance of ds", type(train))
 
         if self.config["benchmark_filename"] is not None:
             return
         self.logger.debug("Augmentation for sequential recommendation.")
-        self.data_augmentation()
+        final_ds_list = []
+        for ds in [train, val, test]:
+            final_ds_list.append(self.augment_one_dataset(ds))
+        return final_ds_list
 
-    def _aug_presets(self):
-        list_suffix = self.config["LIST_SUFFIX"]
-        for field in self.inter_feat:
-            if field != self.uid_field:
-                list_field = field + list_suffix
-                setattr(self, f"{field}_list_field", list_field)
-                ftype = self.field2type[field]
+    def _aug_presets(self, ds):
+        """
+        Set sequential-augmentation metadata on `ds`:
+        - create ds.<field>_list_field names
+        - register their field properties (type/source/seqlen) in ds.field2type/field2seqlen/field2source
+        - register ds.item_list_length_field
+        """
+        list_suffix = ds.config["LIST_SUFFIX"]
+        max_len = ds.config["MAX_ITEM_LIST_LENGTH"]  # more robust than self.max_item_list_len [web:144]
 
-                if ftype in [FeatureType.TOKEN, FeatureType.TOKEN_SEQ]:
-                    list_ftype = FeatureType.TOKEN_SEQ
-                else:
-                    list_ftype = FeatureType.FLOAT_SEQ
+        for field in ds.inter_feat:
+            if field == ds.uid_field:
+                continue
 
-                if ftype in [FeatureType.TOKEN_SEQ, FeatureType.FLOAT_SEQ]:
-                    list_len = (self.max_item_list_len, self.field2seqlen[field])
-                else:
-                    list_len = self.max_item_list_len
+            list_field = field + list_suffix
+            setattr(ds, f"{field}_list_field", list_field)
 
-                self.set_field_property(
-                    list_field, list_ftype, FeatureSource.INTERACTION, list_len
-                )
+            ftype = ds.field2type[field]
 
-        self.set_field_property(
-            self.item_list_length_field, FeatureType.TOKEN, FeatureSource.INTERACTION, 1
+            # token -> token_seq, float -> float_seq
+            if ftype in [FeatureType.TOKEN, FeatureType.TOKEN_SEQ]:
+                list_ftype = FeatureType.TOKEN_SEQ
+            else:
+                list_ftype = FeatureType.FLOAT_SEQ
+
+            # If original field already sequence-like, store (max_len, original_seqlen),
+            # else store max_len. This mirrors RecBole SequentialDataset behavior. [web:124]
+            if ftype in [FeatureType.TOKEN_SEQ, FeatureType.FLOAT_SEQ]:
+                list_len = (max_len, ds.field2seqlen[field])
+            else:
+                list_len = max_len
+
+            ds.set_field_property(list_field, list_ftype, FeatureSource.INTERACTION, list_len)
+
+        # record sequence length field (e.g., "item_length") [web:144]
+        ds.set_field_property(
+            ds.item_list_length_field, FeatureType.TOKEN, FeatureSource.INTERACTION, 1
         )
 
-    def data_augmentation(self):
-        """Augmentation processing for sequential dataset.
+    
+    def augment_one_dataset(self, ds):
+        """Return a new Dataset with sequential augmentation applied."""
+        # Use ds’ metadata but reuse the same augmentation presets in `self`
+        # (or move _aug_presets/_check_field onto ds if you prefer).
+        self._aug_presets(ds)
+        ds._check_field("uid_field", "time_field")
 
-        E.g., ``u1`` has purchase sequence ``<i1, i2, i3, i4>``,
-        then after augmentation, we will generate three cases.
-
-        ``u1, <i1> | i2``
-
-        (Which means given user_id ``u1`` and item_seq ``<i1>``,
-        we need to predict the next item ``i2``.)
-
-        The other cases are below:
-
-        ``u1, <i1, i2> | i3``
-
-        ``u1, <i1, i2, i3> | i4``
-        """
-        self.logger.debug("data_augmentation")
-
-        self._aug_presets()
-
-        self._check_field("uid_field", "time_field")
         max_item_list_len = self.config["MAX_ITEM_LIST_LENGTH"]
-        self.sort(by=[self.uid_field, self.time_field], ascending=True)
+        ds.sort(by=[ds.uid_field, ds.time_field], ascending=True)
+
         last_uid = None
-        uid_list, item_list_index, target_index, item_list_length = [], [], [], []
+        item_list_index, target_index, item_list_length = [], [], []
         seq_start = 0
-        for i, uid in enumerate(self.inter_feat[self.uid_field].numpy()):
+
+        for i, uid in enumerate(ds.inter_feat[ds.uid_field].numpy()):
             if last_uid != uid:
                 last_uid = uid
                 seq_start = i
             else:
                 if i - seq_start > max_item_list_len:
                     seq_start += 1
-                uid_list.append(uid)
                 item_list_index.append(slice(seq_start, i))
                 target_index.append(i)
                 item_list_length.append(i - seq_start)
 
-        uid_list = np.array(uid_list)
-        item_list_index = np.array(item_list_index)
         target_index = np.array(target_index)
         item_list_length = np.array(item_list_length, dtype=np.int64)
 
-        new_length = len(item_list_index)
-        new_data = self.inter_feat[target_index]
-        new_dict = {
-            self.item_list_length_field: torch.tensor(item_list_length),
-        }
+        new_data = ds.inter_feat[target_index]
+        new_dict = {ds.item_list_length_field: torch.tensor(item_list_length)}
 
-        for field in self.inter_feat:
-            if field != self.uid_field:
-                list_field = getattr(self, f"{field}_list_field")
-                list_len = self.field2seqlen[list_field]
-                shape = (
-                    (new_length, list_len)
-                    if isinstance(list_len, int)
-                    else (new_length,) + list_len
-                )
-                if (
-                    self.field2type[field] in [FeatureType.FLOAT, FeatureType.FLOAT_SEQ]
-                    and field in self.config["numerical_features"]
-                ):
-                    shape += (2,)
-                new_dict[list_field] = torch.zeros(
-                    shape, dtype=self.inter_feat[field].dtype
-                )
+        new_length = len(target_index)
+        for field in ds.inter_feat:
+            print()
+            print("ds.inter_feat!!!", ds.inter_feat)
+            print()
 
-                value = self.inter_feat[field]
-                for i, (index, length) in enumerate(
-                    zip(item_list_index, item_list_length)
-                ):
-                    new_dict[list_field][i][:length] = value[index]
+            if field == ds.uid_field:
+                continue
+            list_field = getattr(ds, f"{field}_list_field")
+            list_len = ds.field2seqlen[list_field]
+
+            shape = (new_length, list_len) if isinstance(list_len, int) else (new_length,) + list_len
+            if (ds.field2type[field] in [FeatureType.FLOAT, FeatureType.FLOAT_SEQ]
+                and field in ds.config["numerical_features"]):
+                shape += (2,)
+
+            new_dict[list_field] = torch.zeros(shape, dtype=ds.inter_feat[field].dtype)
+
+            value = ds.inter_feat[field]
+            for j, (index, length) in enumerate(zip(item_list_index, item_list_length)):
+                new_dict[list_field][j][:length] = value[index]
 
         new_data.update(Interaction(new_dict))
-        self.inter_feat = new_data
+        return ds.copy(new_data)
+
+
+    # def data_augmentation(self):
+    #     """Augmentation processing for sequential dataset.
+
+    #     E.g., ``u1`` has purchase sequence ``<i1, i2, i3, i4>``,
+    #     then after augmentation, we will generate three cases.
+
+    #     ``u1, <i1> | i2``
+
+    #     (Which means given user_id ``u1`` and item_seq ``<i1>``,
+    #     we need to predict the next item ``i2``.)
+
+    #     The other cases are below:
+
+    #     ``u1, <i1, i2> | i3``
+
+    #     ``u1, <i1, i2, i3> | i4``
+    #     """
+    #     self.logger.debug("data_augmentation")
+
+    #     self._aug_presets()
+
+    #     self._check_field("uid_field", "time_field")
+    #     max_item_list_len = self.config["MAX_ITEM_LIST_LENGTH"]
+    #     self.sort(by=[self.uid_field, self.time_field], ascending=True)
+    #     last_uid = None
+    #     uid_list, item_list_index, target_index, item_list_length = [], [], [], []
+    #     seq_start = 0
+    #     for i, uid in enumerate(self.inter_feat[self.uid_field].numpy()):
+    #         if last_uid != uid:
+    #             last_uid = uid
+    #             seq_start = i
+    #         else:
+    #             if i - seq_start > max_item_list_len:
+    #                 seq_start += 1
+    #             uid_list.append(uid)
+    #             item_list_index.append(slice(seq_start, i))
+    #             target_index.append(i)
+    #             item_list_length.append(i - seq_start)
+
+    #     uid_list = np.array(uid_list)
+    #     item_list_index = np.array(item_list_index)
+    #     target_index = np.array(target_index)
+    #     item_list_length = np.array(item_list_length, dtype=np.int64)
+
+    #     new_length = len(item_list_index)
+    #     new_data = self.inter_feat[target_index]
+    #     new_dict = {
+    #         self.item_list_length_field: torch.tensor(item_list_length),
+    #     }
+
+    #     for field in self.inter_feat:
+    #         if field != self.uid_field:
+    #             list_field = getattr(self, f"{field}_list_field")
+    #             list_len = self.field2seqlen[list_field]
+    #             shape = (
+    #                 (new_length, list_len)
+    #                 if isinstance(list_len, int)
+    #                 else (new_length,) + list_len
+    #             )
+    #             if (
+    #                 self.field2type[field] in [FeatureType.FLOAT, FeatureType.FLOAT_SEQ]
+    #                 and field in self.config["numerical_features"]
+    #             ):
+    #                 shape += (2,)
+    #             new_dict[list_field] = torch.zeros(
+    #                 shape, dtype=self.inter_feat[field].dtype
+    #             )
+
+    #             value = self.inter_feat[field]
+    #             for i, (index, length) in enumerate(
+    #                 zip(item_list_index, item_list_length)
+    #             ):
+    #                 new_dict[list_field][i][:length] = value[index]
+
+    #     new_data.update(Interaction(new_dict))
+    #     self.inter_feat = new_data
 
     def _benchmark_presets(self):
         list_suffix = self.config["LIST_SUFFIX"]

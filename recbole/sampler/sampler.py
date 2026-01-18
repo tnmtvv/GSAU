@@ -209,7 +209,9 @@ class Sampler(AbstractSampler):
         if not isinstance(phases, list):
             phases = [phases]
         if not isinstance(datasets, list):
+            print("datasets is not a list")
             datasets = [datasets]
+        print("len datasets in the sampler", len(datasets))
         if len(phases) != len(datasets):
             raise ValueError(
                 f"Phases {phases} and datasets {datasets} should have the same length."
