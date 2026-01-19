@@ -14,7 +14,7 @@ if __name__ == '__main__':
     parser.add_argument('--align_per_layer', default = False, action="store_true", help = 'enable per-layer alignment for the graph encoder')
     parser.add_argument('--rec', default = False, action="store_true", help = 'replace the alignment loss of the sequential encoder with rec (CE) loss')
     parser.add_argument('--enable_u_i_uniformity', default = False, action="store_true", help = 'enable (user, negative item) uniformity loss')
-    parser.add_argument('--config_files', type=str, default='./gsau.yaml', help='config files that set other hyperparameters')
+    parser.add_argument('--config_files', type=str, default='./configs/gsau.yaml', help='config files that set other hyperparameters')
 
     args, _ = parser.parse_known_args()
 

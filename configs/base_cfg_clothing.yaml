@@ -1,0 +1,92 @@
+# ---------- Core identifiers ----------
+dataset: amazon-clothing-shoes-jewelry
+model: SASRec
+
+# Used by your wrapper (custom keys)
+graph_encoder: LightGCN
+sequential_encoder: SASRec
+enable_graph_encoder: true
+enable_sequential_encoder: true
+predict_with_graph_encoder: false
+align_per_layer: false
+rec: true
+enable_u_i_uniformity: true
+
+# ---------- Paths / environment ----------
+data_path: dataset
+checkpoint_dir: saved
+gpu_id: "0"
+seed: 2020
+reproducibility: true
+show_progress: true
+verbose: true
+state: INFO
+
+# ---------- Dataset fields ----------
+USER_ID_FIELD: user_id
+ITEM_ID_FIELD: item_id
+TIME_FIELD: timestamp
+
+load_col:
+  inter: [user_id, item_id, timestamp]
+
+LIST_SUFFIX: _list
+ITEM_LIST_LENGTH_FIELD: item_length
+MAX_ITEM_LIST_LENGTH: 50
+TARGET_METRIC: NDCG@10
+
+user_inter_num_interval: "[5,inf)"
+item_inter_num_interval: "[5,inf)"
+
+# ---------- Training ----------
+epochs: 1000
+train_batch_size: 512
+eval_batch_size: 512
+
+# For CE loss, RecBole expects train_neg_sample_args to be "none" (often configured as ~). [web:420]
+train_neg_sample_args: ~
+
+# If you *do* want explicit structure instead of "~", use this block:
+# train_neg_sample_args:
+#   distribution: none
+#   sample_num: none
+#   alpha: none
+#   dynamic: false
+#   candidate_num: 0
+
+# ---------- Evaluation ----------
+metrics: [Recall, MRR, NDCG, Precision]
+topk: [10, 100]
+valid_metric: NDCG@10
+metric_decimal_place: 4
+eval_step: 10
+
+eval_args:
+  group_by: user
+  order: TO
+  split: { LS: valid_and_test }
+  mode:
+    valid: full
+    test: full
+
+repeatable: true
+
+# These are *derived* by Config._set_eval_neg_sample_args from eval_args.mode,
+# but you can still set them explicitly if your fork uses them. [web:420][web:39]
+valid_neg_sample_args:
+  distribution: uniform
+  sample_num: none
+test_neg_sample_args:
+  distribution: uniform
+  sample_num: none
+
+# ---------- Distributed-related keys ----------
+# If you keep local_rank in config, RecBole will go into distributed init path. [web:416]
+# For single-GPU/single-process runs, the simplest is to REMOVE local_rank entirely.
+single_spec: true
+# local_rank: 0
+nproc: 1
+offset: 0
+world_size: 1
+ip: "127.0.0.1"
+port: 29500

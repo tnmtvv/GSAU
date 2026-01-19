@@ -12,41 +12,49 @@ from copy import deepcopy
 
 from recbole.quick_start import run_recbole
 
+from pathlib import Path
+from omegaconf import open_dict
+
 
 CONFIG_DIR = "configs"
 OPTUNA_DIR = "optuna_outputs"
 
+TARGET_METRIC = "ndcg@10"
+
 def suggest_gsau_seq_cfg(config: DictConfig, trial: Trial) -> DictConfig:
     new_config = deepcopy(config)
 
-    new_config.model.n_layers = trial.suggest_int("n_layers", 1, 3, 4)
-    new_config.model.n_heads = trial.suggest_categorical("n_heads", [1, 2, 4, 8])
+    # new_config.n_layers = trial.suggest_int("n_layers", 1, 3, 4)
+    new_config.n_layers = trial.suggest_int("n_layers", 1, 3)  
+    new_config.n_heads = trial.suggest_categorical("n_heads", [1, 2, 4, 8])
 
-    new_config.model.hidden_size = trial.suggest_categorical(
+    new_config.hidden_size = trial.suggest_categorical(
         "hidden_size", [32, 64, 128, 256]
     )
-    new_config.model.inner_size = trial.suggest_categorical(
+
+    new_config.embedding_size = new_config.hidden_size
+    new_config.inner_size = trial.suggest_categorical(
         "inner_size", [128, 256, 512]
     )
 
-    new_config.model.hidden_dropout_prob = trial.suggest_float(
+    new_config.hidden_dropout_prob = trial.suggest_float(
         "hidden_dropout_prob", 0.0, 0.7, step=0.1
     )
-    new_config.model.attn_dropout_prob = trial.suggest_float(
+    new_config.attn_dropout_prob = trial.suggest_float(
         "attn_dropout_prob", 0.0, 0.7, step=0.1
     )
 
-    new_config.model.hidden_act = trial.suggest_categorical(
+    new_config.hidden_act = trial.suggest_categorical(
         "hidden_act", ["gelu", "relu", "swish"]
     )
-    new_config.model.layer_norm_eps = trial.suggest_categorical(
+    new_config.layer_norm_eps = trial.suggest_categorical(
         "layer_norm_eps", [1e-12, 1e-9, 1e-6]
     )
-    new_config.model.initializer_range = trial.suggest_float(
+    new_config.initializer_range = trial.suggest_float(
         "initializer_range", 0.005, 0.05
     )
 
-    new_config.model.loss_type = trial.suggest_categorical("loss_type", ["CE", "BPR"])
+    new_config.loss_type = trial.suggest_categorical("loss_type", ["CE", "BPR"])
 
     return new_config
 
@@ -54,11 +62,11 @@ def suggest_gsau_seq_cfg(config: DictConfig, trial: Trial) -> DictConfig:
 def suggest_lightgcn_cfg(config: DictConfig, trial: Trial) -> DictConfig:
     new_config = deepcopy(config)
 
-    new_config.model.embedding_size = trial.suggest_categorical(
+    new_config.embedding_size = trial.suggest_categorical(
         "embedding_size", [16, 32, 64, 128]
     )
-    new_config.model.n_layers = trial.suggest_int("n_layers", 1, 4)
-    new_config.model.reg_weight = trial.suggest_categorical(
+    new_config.n_layers = trial.suggest_int("n_layers", 1, 4)
+    new_config.reg_weight = trial.suggest_categorical(
         "reg_weight", [1e-5, 1e-4, 1e-3, 1e-2]
     )
 
@@ -68,48 +76,36 @@ def suggest_lightgcn_cfg(config: DictConfig, trial: Trial) -> DictConfig:
 def suggest_gsau_cfg(config: DictConfig, trial: Trial) -> DictConfig:
     new_config = suggest_gsau_seq_cfg(config, trial)
 
-    new_config.model.gamma = trial.suggest_float("gamma", 0.05, 0.5, step=0.1)
+    new_config.gamma = trial.suggest_float("gamma", 0.05, 0.5, step=0.1)
 
     return new_config
 
 
 
-import shutil
-from copy import deepcopy
-from pathlib import Path
 
-import optuna
-from optuna.trial import Trial
-from optuna.samplers import TPESampler
-from optuna.storages import JournalStorage, JournalFileBackend
+# def suggest_gsau_cfg(config: DictConfig, trial: Trial) -> DictConfig:
+#     new_config = deepcopy(config)
 
-from omegaconf import DictConfig, OmegaConf, open_dict
+#     new_config = suggest_gsau_seq_cfg(config, trial)
 
+#     # new_config.n_layers = trial.suggest_int("n_layers", 1, 4)
+#     # new_config.n_heads = trial.suggest_categorical("n_heads", [1, 2, 4, 8])
+#     # new_config.hidden_size = trial.suggest_categorical("hidden_size", [32, 64, 128, 256])
+#     # new_config.inner_size = trial.suggest_categorical("inner_size", [128, 256, 512])
 
-TARGET_METRIC = "recall@10"
+#     new_config.hidden_dropout_prob = trial.suggest_float(
+#         "hidden_dropout_prob", 0.0, 0.7, step=0.1
+#     )
+#     new_config.attn_dropout_prob = trial.suggest_float(
+#         "attn_dropout_prob", 0.0, 0.7, step=0.1
+#     )
 
+#     new_config.hidden_act = trial.suggest_categorical("hidden_act", ["gelu", "relu", "swish"])
+#     new_config.layer_norm_eps = trial.suggest_categorical("layer_norm_eps", [1e-12, 1e-9, 1e-6])
+#     new_config.initializer_range = trial.suggest_float("initializer_range", 0.005, 0.05)
+#     new_config.loss_type = trial.suggest_categorical("loss_type", ["CE", "BPR"])
 
-def suggest_gsau_cfg(config: DictConfig, trial: Trial) -> DictConfig:
-    new_config = deepcopy(config)
-
-    new_config.model.n_layers = trial.suggest_int("n_layers", 1, 4)
-    new_config.model.n_heads = trial.suggest_categorical("n_heads", [1, 2, 4, 8])
-    new_config.model.hidden_size = trial.suggest_categorical("hidden_size", [32, 64, 128, 256])
-    new_config.model.inner_size = trial.suggest_categorical("inner_size", [128, 256, 512, 1024])
-
-    new_config.model.hidden_dropout_prob = trial.suggest_float(
-        "hidden_dropout_prob", 0.0, 0.7, step=0.1
-    )
-    new_config.model.attn_dropout_prob = trial.suggest_float(
-        "attn_dropout_prob", 0.0, 0.7, step=0.1
-    )
-
-    new_config.model.hidden_act = trial.suggest_categorical("hidden_act", ["gelu", "relu", "swish"])
-    new_config.model.layer_norm_eps = trial.suggest_categorical("layer_norm_eps", [1e-12, 1e-9, 1e-6])
-    new_config.model.initializer_range = trial.suggest_float("initializer_range", 0.005, 0.05)
-    new_config.model.loss_type = trial.suggest_categorical("loss_type", ["CE", "BPR"])
-
-    return new_config
+#     return new_config
 
 
 def run_gsau_recbole(config: DictConfig) -> dict:

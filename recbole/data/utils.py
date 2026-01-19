@@ -350,7 +350,7 @@ def create_samplers(config, dataset, built_datasets):
     test_neg_sample_args = config["test_neg_sample_args"]
     repeatable = config["repeatable"]
 
-    print("built datasets before", len(built_datasets))
+    # print("built datasets before", len(built_datasets))
 
     base_sampler = _create_sampler(
         dataset,
@@ -361,7 +361,7 @@ def create_samplers(config, dataset, built_datasets):
     )
     train_sampler = base_sampler.set_phase("train") if base_sampler else None
 
-    print("built datasets after", len(built_datasets))
+    # print("built datasets after", len(built_datasets))
 
     valid_sampler = _create_sampler(
         dataset,

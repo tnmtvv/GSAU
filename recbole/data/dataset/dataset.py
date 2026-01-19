@@ -18,6 +18,7 @@ import os
 import yaml
 from collections import Counter, defaultdict
 from logging import getLogger
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -288,7 +289,6 @@ dataframe_to_interaction(
             dataset_path (str): path of dataset dir.
         """
         if self.benchmark_filename_list is None:
-            print("self.benchmark_filename_list is None")
             inter_feat_path = os.path.join(dataset_path, f"{token}.inter")
             if not os.path.isfile(inter_feat_path):
                 raise ValueError(f"File {inter_feat_path} not exist.")
@@ -319,7 +319,6 @@ dataframe_to_interaction(
                 else:
                     raise ValueError(f"File {file_path} not exist.")
             inter_feat = pd.concat(sub_inter_feats, ignore_index=True)
-            inter_feat.to_csv("first_attempt.csv")
             self.inter_feat, self.file_size_list = inter_feat, sub_inter_lens
             self.field2seqlen = overall_field2seqlen
 
@@ -1753,15 +1752,16 @@ dataframe_to_interaction(
         self.inter_feat.sort(by=by, ascending=ascending)
 
     def build(self):
-        """Processing dataset according to evaluation setting, including Group, Order and Split.
-        See :class:`~recbole.config.eval_setting.EvalSetting` for details.
+        data_path = Path("dataset")
+        dataset_name = self.config["dataset"]
+        general_path = data_path / "global_split" / dataset_name
 
-        Returns:
-            list: List of built :class:`Dataset`.
-        """
+        train_df = pd.read_csv(general_path / "train.csv")
+        valid_df = pd.read_csv(general_path / "validation.csv")
+        test_df = pd.read_csv(general_path / "test.csv")
 
-        train_ds, val_ds, test_ds = pd.read_csv("reviews_Beauty_5/train.csv"),  pd.read_csv("reviews_Beauty_5/validation.csv"),  pd.read_csv("reviews_Beauty_5/test.csv")
-        train_ds, val_ds, test_ds = self._change_feat_format([train_ds, val_ds, test_ds])
+        train_ds, valid_ds, test_ds = self._change_feat_format([train_df, valid_df, test_df])
+        return [train_ds, valid_ds, test_ds]
 
         # if self.benchmark_filename_list is not None:
         #     self._drop_unused_col()
@@ -1821,11 +1821,7 @@ dataframe_to_interaction(
         #     raise NotImplementedError(
         #         f"The splitting_method [{split_mode}] has not been implemented."
         #     )
-        print()
-        print("type of train_ds", type(train_ds))
-        print()
 
-        return [train_ds, val_ds, test_ds] 
 
     def save(self):
         """Saving this :class:`Dataset` object to :attr:`config['checkpoint_dir']`."""
